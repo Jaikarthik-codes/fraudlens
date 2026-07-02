@@ -7,6 +7,12 @@ df = pd.read_csv('../data/raw/Fraud_Data.csv')
 df["signup_time"] = pd.to_datetime(df["signup_time"])
 df["purchase_time"] = pd.to_datetime(df["purchase_time"])
 
+# New feature 1: hour of purchase
+df['purchase_hour'] = df['purchase_time'].dt.hour
+
+# New feature 2: high value purchase flag
+df['high_value'] = (df['purchase_value'] > df['purchase_value'].quantile(0.75)).astype(int)
+
 # Step 2: Engineer new feature - seconds between signup and purchase
 df["time_to_purchase"] = (df["purchase_time"] - df["signup_time"]).dt.total_seconds()
 

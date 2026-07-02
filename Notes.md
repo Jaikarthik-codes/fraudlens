@@ -74,3 +74,52 @@ fraudsters wait longer. Would need richer features in a real system.
 False Positive = model said fraud, was actually legitimate (annoyed customer)
 False Negative = model said not fraud, was actually fraud (money lost)
 False negatives are more dangerous in fraud detection.
+
+## Step 4 - Ensemble Logic
+
+Hard voting: each model votes 0 or 1, majority wins (>= 2 out of 3)
+Soft voting: average the fraud probabilities across models, 
+             if average >= 0.5 call it fraud
+
+Why ensemble helps in theory:
+Each model makes different mistakes. Combining them reduces the chance
+that all three are wrong on the same transaction simultaneously.
+
+Results: Both hard and soft voting gave identical output to individual models
+- Precision: 1.00 (every fraud flag was correct)
+- Recall: 0.53 (still missing 47% of fraud cases)
+- False alarms: only 1
+
+Why didn't ensemble improve recall?
+All three models are learning from the same imbalanced dataset and 
+relying heavily on time_to_purchase (77.5% feature importance).
+Their errors overlap almost completely, so combining them doesn't 
+add new information. Would need more diverse features to see 
+ensemble gains on recall.
+
+## Dataset Switch Decision
+
+Tried class_weight='balanced' on Random Forest:
+- Recall moved from 0.530 to 0.540 (tiny)
+- False alarms jumped from 40 to 461 (bad trade, reverted)
+
+Engineered two new features:
+- purchase_hour: hour of day from purchase_time using .dt.hour
+  Logic: fraudsters may transact at unusual hours
+- high_value: top 25% of purchase values flagged as 1
+  Logic: fraudsters often target expensive items
+  .quantile(0.75) finds the value where 75% of purchases fall below it
+
+Feature importance after all features added:
+- time_to_purchase: 68.2% (down from 77.5% but still dominant)
+- purchase_value: 11.2%
+- age: 9.9%
+- purchase_hour: 8.4%
+- high_value: 0.25%
+
+Recall after new features: 0.527 (essentially unchanged from 0.530)
+
+Conclusion: Dataset signal ceiling confirmed. The information needed 
+to identify the remaining 47% of fraud cases does not exist in this 
+dataset's columns. Switching to ULB Credit Card Fraud dataset based 
+on evidence, not assumption.
