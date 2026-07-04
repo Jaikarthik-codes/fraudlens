@@ -1,6 +1,6 @@
 # Fraud Detection System
 
-A multi-model fraud detection system built from scratch for 
+A multimodel fraud detection system built from scratch for 
 e-commerce transactions. Built with the explicit goal of being 
 able to defend every decision in a technical interview.
 
