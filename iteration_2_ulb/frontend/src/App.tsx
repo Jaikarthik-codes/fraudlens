@@ -105,7 +105,7 @@ export default function App() {
     setError(null)
 
     try {
-      const response = await fetch('https://fraudlens-api-9xhd.onrender.com/predic', {
+      const response = await fetch('https://fraudlens-api-9xhd.onrender.com/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(selected.data),
