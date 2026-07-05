@@ -241,7 +241,7 @@ export default function App() {
 
       {/* ── Footer ── */}
       <footer className="footer">
-        FraudLens <span className="footer__dot" /> Fraud Detection System
+        FraudLens <span className="footer__dot" /> Fraud Detection System <span className="footer__dot" /> 2026
       </footer>
     </div>
   )
