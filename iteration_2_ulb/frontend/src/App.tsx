@@ -241,7 +241,7 @@ export default function App() {
 
       {/* ── Footer ── */}
       <footer className="footer">
-        FraudLens™ 2026
+        FraudLens™ 2025
       </footer>
     </div>
   )
