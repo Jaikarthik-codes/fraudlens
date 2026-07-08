@@ -169,3 +169,31 @@ True Negatives:  56,847  (legitimate correctly identified)
 False Positives:     17  (legitimate wrongly flagged)
 False Negatives:     18  (fraud missed)
 True Positives:      80  (fraud correctly caught)
+
+## Step 7 - Deployment
+
+Backend — Render:
+URL: https://fraudlens-api-9xhd.onrender.com
+Stack: Flask + gunicorn
+Port: 10000 (Render requirement)
+Models loaded from models/ folder at startup
+Scaler loaded from models/scaler.pkl (fitted on raw creditcard.csv)
+Note: Free tier spins down after inactivity — first request takes 50+ seconds
+
+Frontend — Vercel:
+URL: https://fraudlens-eight.vercel.app
+Stack: React + Vite + TypeScript
+Auto-deploys on every push to main branch
+Fetch URL hardcoded to Render backend URL
+
+Why gunicorn instead of Flask dev server:
+Flask's built-in server is for development only.
+Render couldn't detect the port with Flask dev server.
+Gunicorn is a production-grade WSGI server — handles real traffic properly.
+
+Large files excluded from GitHub:
+creditcard.csv (143MB) and creditcard_cleaned.csv (150MB) exceed
+GitHub's 100MB limit. Added to .gitignore.
+Anyone cloning the repo must download from Kaggle directly.
+
+Project complete — FraudLens v1.0
