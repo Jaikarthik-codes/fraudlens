@@ -75,4 +75,4 @@ Place in iteration_2_ulb/data/raw/
 Python, pandas, NumPy, scikit-learn, imbalanced-learn, 
 Flask, flask-cors, React, TypeScript, Vite
 
-Update README: add project overview and setup instructions
+Update README: add project overview
