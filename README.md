@@ -73,4 +73,4 @@ Place in iteration_2_ulb/data/raw/
 
 ## Stacks Used
 Python, pandas, NumPy, scikit-learn, imbalanced-learn, 
-Flask, flask-cors, React, TypeScript, Vite
+Flask, flask-cors, React, TypeScript, 
