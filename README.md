@@ -64,7 +64,7 @@ cd iteration_2_ulb/frontend
 npm install
 npm run dev
 
-Open http://localhost:5173
+Open https://fraudlens-two.vercel.app/
 
 ## Data
 Download creditcard.csv from Kaggle:
