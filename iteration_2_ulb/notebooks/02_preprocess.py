@@ -1,4 +1,5 @@
 import pandas as pd
+import joblib
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from imblearn.over_sampling import SMOTE
@@ -7,13 +8,16 @@ from imblearn.over_sampling import SMOTE
 df = pd.read_csv("../data/raw/creditcard.csv")
 
 # Scale Amount and Time since V1-V28 are already scaled from PCA
+# One scaler fitted on both columns, so the API can reuse it as-is
 scaler = StandardScaler()
-scaled_Amount = scaler.fit_transform(df[["Amount"]])
-scaled_Time = scaler.fit_transform(df[["Time"]])
+scaled = scaler.fit_transform(df[["Amount", "Time"]])
 df = df.drop(["Amount", "Time"], axis=1)
 
-df["scaled_Amount"] = scaled_Amount.flatten()
-df["scaled_Time"] = scaled_Time.flatten()
+df["scaled_Amount"] = scaled[:, 0]
+df["scaled_Time"] = scaled[:, 1]
+
+# Save the scaler so the Flask API scales new transactions the same way
+joblib.dump(scaler, "../models/scaler.pkl")
 
 # Split into train and test sets before applying SMOTE
 x = df.drop(columns = ["Class"])

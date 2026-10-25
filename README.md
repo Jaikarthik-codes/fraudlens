@@ -7,10 +7,13 @@ to defend it in a technical interview.
 FraudLens/
 ├── iteration_1_fraud_data/   ← Documented dead end (Fraud_Data.csv)
 └── iteration_2_ulb/          ← Final system (ULB Credit Card dataset)
-    ├── backend/              ← Flask API + trained models
+    ├── backend/              ← FastAPI API + tests
     ├── frontend/             ← React app (Vite + TypeScript)
     ├── notebooks/            ← Training and evaluation scripts
-    └── models/               ← Saved .pkl model files
+    ├── models/               ← Saved .pkl model files
+    └── data/                 ← creditcard.csv (not in git, see Data below)
+
+See PROJECT_GUIDE.md for how everything works and a log of changes.
 
 ## Iteration 1 — Fraud_Data.csv (Documented Dead End)
 E-commerce fraud dataset with interpretable features.
@@ -42,10 +45,17 @@ Soft Voting          0.44      0.88    0.59
 Ensemble did not outperform Random Forest individually because 
 all three models make similar errors on this dataset.
 
-## Flask API
+## FastAPI Backend
 Accepts POST request with raw V1-V28, Amount, Time values.
 Scales Amount and Time using StandardScaler.
 Returns prediction (fraud/legitimate) and confidence score.
+Returns HTTP 422 naming the offending fields if input is missing or non-numeric.
+Interactive API docs are served at `/docs`.
+`GET /health` returns `{"status": "ok"}`.
+
+Note: `confidence` is the Random Forest fraud probability. The model was
+trained on SMOTE-balanced data, so it is not calibrated to the real 0.17%
+fraud rate — read it as a model score, not a true probability.
 
 ## React Frontend
 Dark theme UI with FraudLens branding.
@@ -57,7 +67,8 @@ Displays prediction result with confidence percentage bar.
 ### Backend
 cd iteration_2_ulb/backend
 pip install -r requirements.txt
-python app.py
+uvicorn app:app --port 5000      # port 5000 matches the Vite dev proxy
+# tests: pip install -r requirements-dev.txt && pytest
 
 ### Frontend
 cd iteration_2_ulb/frontend
@@ -73,4 +84,5 @@ Place in iteration_2_ulb/data/raw/
 
 ## Stacks Used
 Python, pandas, NumPy, scikit-learn, imbalanced-learn, 
-Flask, flask-cors,
+joblib, FastAPI, Pydantic, Uvicorn, React, Vite, TypeScript.
+Deployed on Render (API) and Vercel (frontend).

@@ -1,63 +1,67 @@
-from flask import Flask, render_template, request
-from flask_cors import CORS
-from flask import jsonify
+from pathlib import Path
+import os
+from typing import Annotated
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import Field, create_model
 import joblib
 import numpy as np
 
-app = Flask(__name__)
-CORS(app)
+app = FastAPI(title="FraudLens API")
+
+# Allow the React app (Vercel / Vite dev server) to call this API
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Models live next to the backend folder; resolve from this file so the app
+# works no matter which directory it is started from
+MODELS_DIR = Path(__file__).resolve().parent.parent / 'models'
 
 # Load the trained model
-model = joblib.load('../models/rf_model.pkl')
+model = joblib.load(MODELS_DIR / 'rf_model.pkl')
 
-# Load raw data to fit scaler
-scaler = joblib.load('../models/scaler.pkl')
+# Scaler fitted on raw Amount and Time (see notebooks/02_preprocess.py)
+scaler = joblib.load(MODELS_DIR / 'scaler.pkl')
 
-# Real transaction presets from test set
-presets = {
-    "Fraud 1":    [-2.3122, 1.9519, -1.6098, 3.9979, -0.5221, -1.4265, -2.5373, 1.3916, -2.7700, -2.7722, 3.2020, -2.8999, -0.5952, -4.2892, 0.3897, -1.1407, -2.8300, -0.0168, 0.4169, 0.1269, 0.5172, -0.0350, -0.4652, 0.3201, 0.0445, 0.1778, 0.2611, -0.1432, -0.3532, -1.9880],
-    "Fraud 2":    [-3.0435, -3.1573, 1.0884, 2.2886, 1.3598, -1.0648, 0.3255, -0.0677, -0.2709, -0.8385, -0.4145, -0.5031, 0.6765, -1.6920, 2.0006, 0.6667, 0.5997, 1.7253, 0.2833, 2.1023, 0.6616, 0.4354, 1.3759, -0.2938, 0.2797, -0.1453, -0.2527, 0.0357, 1.7617, -1.9866],
-    "Fraud 3":    [-2.3033, 1.7592, -0.3597, 2.3302, -0.8216, -0.0757, 0.5623, -0.3991, -0.2382, -1.5254, 2.0329, -6.5601, 0.0229, -1.4701, -0.6988, -2.2821, -4.7818, -2.6156, -1.3344, -0.4300, -0.2941, -0.9323, 0.1727, -0.0873, -0.1561, -0.5426, 0.0395, -0.1530, 0.6060, -1.9026],
-    "Legit 1":    [-1.3598, -0.0727, 2.5363, 1.3781, -0.3383, 0.4623, 0.2395, 0.0986, 0.3637, 0.0907, -0.5515, -0.6178, -0.9913, -0.3111, 1.4681, -0.4704, 0.2079, 0.0257, 0.4039, 0.2514, -0.0183, 0.2778, -0.1104, 0.0669, 0.1285, -0.1891, 0.1335, -0.0210, 0.2449, -1.9965],
-    "Legit 2":    [1.1918, 0.2661, 0.1664, 0.4481, 0.0600, -0.0823, -0.0788, 0.0851, -0.2554, -0.1669, 1.6127, 1.0652, 0.4890, -0.1437, 0.6355, 0.4639, -0.1148, -0.1833, -0.1457, -0.0690, -0.2257, -0.6386, 0.1012, -0.3398, 0.1671, 0.1258, -0.0089, 0.0147, -0.3424, -1.9965],
-    "Legit 3":    [-1.3583, -1.3401, 1.7732, 0.3797, -0.5031, 1.8004, 0.7914, 0.2476, -1.5146, 0.2076, 0.6245, 0.0660, 0.7172, -0.1659, 2.3458, -2.8900, 1.1099, -0.1213, -2.2618, 0.5249, 0.2479, 0.7716, 0.9094, -0.6892, -0.3276, -0.1390, -0.0553, -0.0597, 1.1606, -1.9965]
-}
+# Order matters: this is the column order the model was trained on
+V_FEATURES = [f'V{i}' for i in range(1, 29)]
+REQUIRED_FIELDS = V_FEATURES + ['Amount', 'Time']
 
-@app.route('/')
-def home():
-    return render_template('index.html', presets=presets.keys())
+# Request schema: 30 required numbers. FastAPI/Pydantic rejects missing or
+# non-numeric fields with a 422 response that names the bad fields, so no
+# manual validation is needed. strict=True stops strings like "1.5" or true.
+Number = Annotated[float, Field(strict=True, allow_inf_nan=False)]
+Transaction = create_model('Transaction', **{name: (Number, ...) for name in REQUIRED_FIELDS})
 
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    data = request.get_json()
+@app.get('/health')
+def health():
+    return {'status': 'ok'}
 
-    # Extract and scale Amount and Time
-    amount = [[data['Amount']]]
-    time = [[data['Time']]]
-    scaled_amount = scaler.transform([[data['Amount'], data['Time']]])[0][0]
-    scaled_time = scaler.transform([[data['Amount'], data['Time']]])[0][1]
+
+# Plain `def` (not `async def`): FastAPI runs it in a worker thread, so the
+# blocking scikit-learn call does not freeze the event loop.
+@app.post('/predict')
+def predict(transaction: Transaction):
+    data = transaction.model_dump()
+
+    # Scale Amount and Time the same way as during training
+    scaled_amount, scaled_time = scaler.transform([[data['Amount'], data['Time']]])[0]
 
     # Build feature array in correct order
-    features = [
-        data['V1'], data['V2'], data['V3'], data['V4'],
-        data['V5'], data['V6'], data['V7'], data['V8'],
-        data['V9'], data['V10'], data['V11'], data['V12'],
-        data['V13'], data['V14'], data['V15'], data['V16'],
-        data['V17'], data['V18'], data['V19'], data['V20'],
-        data['V21'], data['V22'], data['V23'], data['V24'],
-        data['V25'], data['V26'], data['V27'], data['V28'],
-        scaled_amount, scaled_time
-    ]
+    features = [data[f] for f in V_FEATURES] + [scaled_amount, scaled_time]
 
     features_array = np.array(features).reshape(1, -1)
     prediction = model.predict(features_array)[0]
     probability = model.predict_proba(features_array)[0][1]
     result = "FRAUD" if prediction == 1 else "LEGITIMATE"
 
-    return jsonify({
+    return {
         'prediction': result.lower(),
-        'confidence': round(probability, 4)
-    })
+        'confidence': round(float(probability), 4)
+    }
+
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000, debug=False)
+    import uvicorn
+    uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
