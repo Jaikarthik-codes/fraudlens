@@ -1,6 +1,6 @@
 # FraudLens — Project Guide
 
-A plain-language guide to what FraudLens does, how it works, what has changed since the project began, and what could be done next. Written so you can explain and defend every part of it.
+A plain-language guide to what FraudLens does, how it works, what has changed since the project began, and what could be done next. Written so you can explain and defend every part of it. For presentation prep (pitches, demo script, likely questions and answers), see `VIVA_GUIDE.md`.
 
 ---
 

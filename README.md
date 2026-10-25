@@ -13,7 +13,8 @@ FraudLens/
     ├── models/               ← Saved .pkl model files
     └── data/                 ← creditcard.csv (not in git, see Data below)
 
-See PROJECT_GUIDE.md for how everything works and a log of changes.
+See PROJECT_GUIDE.md for how everything works and a log of changes,
+and VIVA_GUIDE.md for how to explain and defend the project.
 
 ## Iteration 1 — Fraud_Data.csv (Documented Dead End)
 E-commerce fraud dataset with interpretable features.
