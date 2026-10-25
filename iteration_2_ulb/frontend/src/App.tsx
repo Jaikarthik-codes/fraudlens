@@ -1,14 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
-// Empty in dev (the Vite proxy forwards /predict to local Flask);
+// Empty in dev (the Vite proxy forwards API calls to the local backend);
 // set to the Render URL for production builds in .env.production
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 
 /* ────────────────────────────────────────────
    Preset Transactions
-   Each preset mirrors the feature vector your
-   Flask model expects. Adjust field names to
-   match your backend's expected JSON payload.
+   Each preset mirrors the feature vector the
+   backend model expects (V1-V28, Amount, Time).
    ──────────────────────────────────────────── */
 interface Transaction {
   label: string
@@ -93,44 +92,89 @@ interface PredictionResult {
   confidence: number
 }
 
+// Response of POST /compare: every model plus the two ensembles
+interface ComparisonResult {
+  models: Record<string, PredictionResult>
+  hard_voting: { prediction: string; votes_for_fraud: number }
+  soft_voting: PredictionResult
+}
+
+const MODEL_NAMES: Record<string, string> = {
+  random_forest: 'Random Forest',
+  gradient_boosting: 'Gradient Boosting',
+  adaboost: 'AdaBoost',
+}
+
+function Verdict({ prediction }: { prediction: string }) {
+  const fraud = prediction.toLowerCase() === 'fraud'
+  return (
+    <span className={fraud ? 'verdict-chip verdict-chip--fraud' : 'verdict-chip verdict-chip--legit'}>
+      {fraud ? 'Fraud' : 'Legitimate'}
+    </span>
+  )
+}
+
 export default function App() {
   const [selectedIdx, setSelectedIdx] = useState<number>(-1)
+  const [amountInput, setAmountInput] = useState('')
   const [result, setResult] = useState<PredictionResult | null>(null)
+  const [comparison, setComparison] = useState<ComparisonResult | null>(null)
   const [loading, setLoading] = useState(false)
+  const [comparing, setComparing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [serverStatus, setServerStatus] = useState<'waking' | 'ready' | 'offline'>('waking')
+
+  // The free Render server sleeps when idle and takes up to a minute to start.
+  // Pinging /health as soon as the page opens wakes it before the user clicks.
+  useEffect(() => {
+    fetch(`${API_URL}/health`)
+      .then((response) => setServerStatus(response.ok ? 'ready' : 'offline'))
+      .catch(() => setServerStatus('offline'))
+  }, [])
 
   const selected = selectedIdx >= 0 ? PRESET_TRANSACTIONS[selectedIdx] : null
 
-  async function handlePredict() {
-    if (!selected) return
+  // The Amount box starts at the preset's amount but can be edited, so the
+  // user can see how the same transaction scores at a different amount
+  const amount = Number(amountInput)
+  const amountValid = amountInput.trim() !== '' && Number.isFinite(amount) && amount >= 0
 
-    setLoading(true)
+  // Shared by the Predict and Compare buttons: POST the transaction to `path`
+  async function send<T>(path: string, setBusy: (busy: boolean) => void, onSuccess: (json: T) => void) {
+    if (!selected || !amountValid) return
+
+    setBusy(true)
     setResult(null)
+    setComparison(null)
     setError(null)
 
     try {
-      const response = await fetch(`${API_URL}/predict`, {
+      const response = await fetch(`${API_URL}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(selected.data),
+        body: JSON.stringify({ ...selected.data, Amount: amount }),
       })
 
       if (!response.ok) {
         throw new Error(`Server responded with ${response.status}`)
       }
 
-      const json: PredictionResult = await response.json()
-      setResult(json)
+      onSuccess(await response.json())
+      setServerStatus('ready')
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An unexpected error occurred'
       setError(message)
     } finally {
-      setLoading(false)
+      setBusy(false)
     }
   }
 
+  const handlePredict = () => send<PredictionResult>('/predict', setLoading, setResult)
+  const handleCompare = () => send<ComparisonResult>('/compare', setComparing, setComparison)
+
   const isFraud = result?.prediction?.toLowerCase() === 'fraud'
   const confidencePercent = result ? (result.confidence * 100).toFixed(1) : '0'
+  const busy = loading || comparing
 
   return (
     <div className="app-container">
@@ -141,6 +185,11 @@ export default function App() {
           <h1 className="header__title">FraudLens</h1>
         </div>
         <p className="header__subtitle">AI-powered transaction fraud detection</p>
+        <p className={`server-status server-status--${serverStatus}`} role="status">
+          {serverStatus === 'waking' && 'Waking up the server… the first request can take up to a minute'}
+          {serverStatus === 'ready' && 'Server ready'}
+          {serverStatus === 'offline' && 'Server unreachable — try again in a moment'}
+        </p>
       </header>
 
       {/* ── Main Card ── */}
@@ -155,8 +204,11 @@ export default function App() {
             className="form-select"
             value={selectedIdx}
             onChange={(e) => {
-              setSelectedIdx(Number(e.target.value))
+              const idx = Number(e.target.value)
+              setSelectedIdx(idx)
+              setAmountInput(String(PRESET_TRANSACTIONS[idx].amount))
               setResult(null)
+              setComparison(null)
               setError(null)
             }}
           >
@@ -179,10 +231,22 @@ export default function App() {
               <span className="detail-value">{selected.description}</span>
             </div>
             <div className="detail-item">
-              <span className="detail-key">Amount</span>
-              <span className="detail-value">
-                ${selected.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-              </span>
+              <label className="detail-key" htmlFor="amount-input">
+                Amount ($) — editable
+              </label>
+              <input
+                id="amount-input"
+                className={`detail-input ${amountValid ? '' : 'detail-input--invalid'}`}
+                type="number"
+                min="0"
+                step="0.01"
+                value={amountInput}
+                onChange={(e) => {
+                  setAmountInput(e.target.value)
+                  setResult(null)
+                  setComparison(null)
+                }}
+              />
             </div>
             <div className="detail-item">
               <span className="detail-key">Features</span>
@@ -197,7 +261,7 @@ export default function App() {
         <button
           id="predict-button"
           className={`btn-predict ${loading ? 'btn-predict--loading' : ''}`}
-          disabled={!selected || loading}
+          disabled={!selected || !amountValid || busy}
           onClick={handlePredict}
         >
           {loading ? (
@@ -208,6 +272,15 @@ export default function App() {
           ) : (
             'Predict'
           )}
+        </button>
+
+        <button
+          id="compare-button"
+          className="btn-secondary"
+          disabled={!selected || !amountValid || busy}
+          onClick={handleCompare}
+        >
+          {comparing ? 'Comparing…' : 'Compare all models'}
         </button>
 
         {/* Result */}
@@ -222,8 +295,10 @@ export default function App() {
               </span>
             </div>
 
+            {/* This number is the model's fraud probability, so a low value on a
+                legitimate result means "very unlikely to be fraud" */}
             <p className="result__confidence">
-              Confidence: <strong>{confidencePercent}%</strong>
+              Fraud score: <strong>{confidencePercent}%</strong>
             </p>
 
             <div className="confidence-bar">
@@ -232,6 +307,44 @@ export default function App() {
                 style={{ width: `${confidencePercent}%` }}
               />
             </div>
+          </div>
+        )}
+
+        {/* Model comparison */}
+        {comparison && (
+          <div className="comparison" id="model-comparison">
+            <table className="comparison__table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Verdict</th>
+                  <th>Fraud score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(comparison.models).map(([key, score]) => (
+                  <tr key={key}>
+                    <td>{MODEL_NAMES[key] ?? key}</td>
+                    <td><Verdict prediction={score.prediction} /></td>
+                    <td>{(score.confidence * 100).toFixed(1)}%</td>
+                  </tr>
+                ))}
+                <tr className="comparison__ensemble">
+                  <td>Hard voting (2 of 3)</td>
+                  <td><Verdict prediction={comparison.hard_voting.prediction} /></td>
+                  <td>{comparison.hard_voting.votes_for_fraud} of 3 votes</td>
+                </tr>
+                <tr className="comparison__ensemble">
+                  <td>Soft voting (average)</td>
+                  <td><Verdict prediction={comparison.soft_voting.prediction} /></td>
+                  <td>{(comparison.soft_voting.confidence * 100).toFixed(1)}%</td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="comparison__note">
+              Random Forest is the model used for the main result. Gradient Boosting and AdaBoost
+              flag far more transactions as fraud, which is why the ensembles score worse overall.
+            </p>
           </div>
         )}
 

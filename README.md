@@ -13,7 +13,8 @@ FraudLens/
     ├── models/               ← Saved .pkl model files
     └── data/                 ← creditcard.csv (not in git, see Data below)
 
-See PROJECT_GUIDE.md for how everything works and a log of changes.
+See PROJECT_GUIDE.md for how everything works and a log of changes,
+and VIVA_GUIDE.md for how to explain and defend the project.
 
 ## Iteration 1 — Fraud_Data.csv (Documented Dead End)
 E-commerce fraud dataset with interpretable features.
@@ -52,6 +53,8 @@ Returns prediction (fraud/legitimate) and confidence score.
 Returns HTTP 422 naming the offending fields if input is missing or non-numeric.
 Interactive API docs are served at `/docs`.
 `GET /health` returns `{"status": "ok"}`.
+`POST /compare` takes the same input and returns Random Forest, Gradient Boosting,
+AdaBoost, hard-voting and soft-voting results side by side.
 
 Note: `confidence` is the Random Forest fraud probability. The model was
 trained on SMOTE-balanced data, so it is not calibrated to the real 0.17%
@@ -60,7 +63,8 @@ fraud rate — read it as a model score, not a true probability.
 ## React Frontend
 Dark theme UI with FraudLens branding.
 Preset transactions dropdown using real fraud cases from test set.
-Displays prediction result with confidence percentage bar.
+Editable Amount, a fraud-score bar, and a "Compare all models" table.
+Wakes the (free-tier) server when the page opens and shows its status.
 
 ## How to Run
 
