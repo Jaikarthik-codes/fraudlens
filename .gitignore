@@ -1,10 +1,8 @@
-<<<<<<< HEAD
 .DS_Store
 .idea/
 *.pyc
 __pycache__/
 .venv/
-=======
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -223,7 +221,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
->>>>>>> fd51de60d0c450214a4ee2c0f0d67f3730128d21
 notebooks/RoughWork.py
 
 iteration_2_ulb/data/raw/creditcard.csv

@@ -1,5 +1,9 @@
 import { useState } from 'react'
 
+// Empty in dev (the Vite proxy forwards /predict to local Flask);
+// set to the Render URL for production builds in .env.production
+const API_URL = import.meta.env.VITE_API_URL ?? ''
+
 /* ────────────────────────────────────────────
    Preset Transactions
    Each preset mirrors the feature vector your
@@ -105,7 +109,7 @@ export default function App() {
     setError(null)
 
     try {
-      const response = await fetch('https://fraudlens-api-9xhd.onrender.com/predict', {
+      const response = await fetch(`${API_URL}/predict`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(selected.data),
