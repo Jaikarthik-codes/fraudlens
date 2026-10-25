@@ -1,12 +1,56 @@
+import json
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app import app, REQUIRED_FIELDS
 
+# The five demo transactions shown in the React page. Their expected verdicts
+# were checked against the original Flask app and match NOTES.md (4 of 5 fraud).
+SAMPLES = json.loads((Path(__file__).parent / 'sample_transactions.json').read_text())
+
 
 @pytest.fixture
 def client():
     return TestClient(app)
+
+
+@pytest.mark.parametrize('sample', SAMPLES, ids=[s['label'][:20] for s in SAMPLES])
+def test_demo_transactions_keep_their_verdicts(client, sample):
+    response = client.post('/predict', json=sample['data'])
+    assert response.status_code == 200
+    assert response.json()['prediction'] == sample['expected_random_forest']
+
+
+def test_compare_returns_all_models_and_ensembles(client):
+    response = client.post('/compare', json=SAMPLES[1]['data'])
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body['models']) == {'random_forest', 'gradient_boosting', 'adaboost'}
+    assert 0 <= body['hard_voting']['votes_for_fraud'] <= 3
+    assert 0.0 <= body['soft_voting']['confidence'] <= 1.0
+
+
+def test_compare_ensembles_follow_their_rules(client):
+    body = client.post('/compare', json=SAMPLES[1]['data']).json()
+    scores = [m['confidence'] for m in body['models'].values()]
+    votes = sum(m['prediction'] == 'fraud' for m in body['models'].values())
+    assert body['hard_voting']['votes_for_fraud'] == votes
+    assert (body['hard_voting']['prediction'] == 'fraud') == (votes >= 2)
+    # soft voting averages the three scores (allow for 4-decimal rounding)
+    assert body['soft_voting']['confidence'] == pytest.approx(sum(scores) / 3, abs=1e-3)
+
+
+def test_compare_rejects_bad_input(client):
+    assert client.post('/compare', json={'V1': 1.0}).status_code == 422
+
+
+def test_random_forest_in_compare_matches_predict(client):
+    data = SAMPLES[0]['data']
+    single = client.post('/predict', json=data).json()
+    rf = client.post('/compare', json=data).json()['models']['random_forest']
+    assert rf == single
 
 
 def valid_payload():

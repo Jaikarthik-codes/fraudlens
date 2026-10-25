@@ -428,6 +428,140 @@ body::before {
   }
 }
 
+/* ===== Server status ===== */
+.server-status {
+  margin-top: 12px;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.server-status--waking {
+  color: #fbbf24;
+}
+
+.server-status--ready {
+  color: var(--legit-color);
+}
+
+.server-status--offline {
+  color: var(--fraud-color);
+}
+
+/* ===== Editable amount ===== */
+.detail-input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 0.9rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.detail-input:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.detail-input--invalid {
+  border-color: var(--fraud-color);
+}
+
+/* ===== Secondary button ===== */
+.btn-secondary {
+  width: 100%;
+  margin-top: 12px;
+  padding: 14px;
+  background: transparent;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: all var(--transition);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--border-focus);
+  background: var(--bg-card-hover);
+}
+
+.btn-secondary:focus-visible {
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== Model comparison ===== */
+.comparison {
+  margin-top: 24px;
+  animation: resultSlideIn 400ms ease;
+}
+
+.comparison__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.comparison__table th {
+  padding: 8px 6px;
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border-input);
+}
+
+.comparison__table td {
+  padding: 10px 6px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.comparison__ensemble td:first-child {
+  color: var(--text-secondary);
+}
+
+.comparison__note {
+  margin-top: 12px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.verdict-chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.verdict-chip--fraud {
+  background: var(--fraud-glow);
+  color: #f87171;
+}
+
+.verdict-chip--legit {
+  background: var(--legit-glow);
+  color: #4ade80;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 560px) {
   .app-container {
