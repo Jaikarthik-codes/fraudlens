@@ -9,7 +9,7 @@ How to explain this project from the first idea to the last prediction, and how 
 ## 1. The three versions of your pitch
 
 ### 30 seconds
-"FraudLens detects fraudulent credit-card transactions. The hard part is that only 0.17% of transactions are fraud, so accuracy is meaningless. I used SMOTE to rebalance the training data, trained three models, and found that a Random Forest gave the best balance: it catches 82% of fraud, and 82% of what it flags really is fraud. I deployed it as a live web app: a React page talks to a FastAPI service that runs the model."
+"FraudLens detects fraudulent credit-card transactions. The hard part is that only 0.17% of transactions are fraud, so accuracy is meaningless. I used SMOTE to rebalance the training data, trained three models, and found that a Random Forest gave the best balance: it catches 82% of fraud, and 82% of what it flags really is fraud. I built a Python dashboard that runs the model on real transactions it has never seen and shows what it catches, misses and wrongly flags."
 
 ### 3 minutes
 1. **Problem.** Fraud is rare and costly. A model that says "legitimate" every time is 99.83% accurate and useless.
@@ -17,7 +17,7 @@ How to explain this project from the first idea to the last prediction, and how 
 3. **Second dataset.** The ULB credit-card data: 284,807 transactions, 492 fraud.
 4. **Method.** Scale two columns, split 80/20 keeping the fraud ratio, apply SMOTE to the training set only, train Random Forest, Gradient Boosting and AdaBoost, and evaluate on the untouched test set.
 5. **Result.** Random Forest: precision 0.82, recall 0.82, F1 0.82. The boosting models had higher recall but terrible precision. The ensemble didn't beat Random Forest.
-6. **System.** A FastAPI backend loads the saved model and scaler. A React frontend lets you pick a transaction and see the verdict. Backend on Render, frontend on Vercel.
+6. **System.** A Streamlit dashboard, all in Python, runs the saved models on 500 real test-set transactions and checks every answer against the truth, with a threshold slider to show the trade-off. A FastAPI service offers the same model as an API. Both share one scoring file.
 7. **Honest limits.** Scores aren't calibrated probabilities, the threshold is the default 0.5, and I evaluated on one split.
 
 ### 10 minutes
@@ -78,25 +78,33 @@ All trained on the same SMOTE data (100 trees each, `random_state=42`), tested o
 - Models and the scaler are saved with `joblib` into `models/`.
 - The scaler is saved too because **new transactions must be scaled exactly as the training data was**. Otherwise `Amount` would mean something different to the model.
 
-### Step 8 — Backend (FastAPI)
-When the page sends a transaction to `/predict`:
+### Step 8 — Scoring a transaction (`backend/scoring.py`, used by the dashboard and the API)
+1. **Check** the 30 inputs are present (`V1`–`V28`, `Amount`, `Time`).
+2. **Scale** `Amount` and `Time` with the saved scaler.
+3. **Arrange** the 30 values in the exact column order the model was trained on.
+4. **Score**: `predict_proba` gives each model's fraud probability; soft voting is their average.
+
+The **FastAPI** service (`backend/app.py`) wraps the same code for other programs. When a program sends a transaction to `/predict`:
 1. **Validate**: 30 required numbers (`V1`–`V28`, `Amount`, `Time`), otherwise a clear 422 error.
 2. **Scale** `Amount` and `Time` with the saved scaler.
 3. **Arrange** the 30 values in the exact column order the model was trained on.
-4. **Predict**: `predict_proba` gives the fraud probability; the class is fraud when it is 0.5 or more.
+4. **Predict**: `predict_proba` gives the fraud probability; the class is fraud when it is above 0.5.
 5. **Return** `{"prediction": "fraud", "confidence": 0.97}`.
 
 `/compare` runs all three models plus both ensembles. `/health` is a simple "I'm alive" check.
 
-### Step 9 — Frontend (React)
-- Pick one of five real transactions (taken from the test set, per your notes), optionally edit the Amount, click **Predict** or **Compare all models**.
-- It shows the verdict and a "fraud score" bar.
-- On page load it wakes the sleeping free-tier server.
+### Step 9 — Dashboard (Streamlit, `dashboard/streamlit_app.py`)
+- **Why no input form:** the inputs are 28 anonymous PCA numbers that nobody can make up. So the dashboard uses **500 real transactions from the test set** (all 98 test frauds plus 402 random legitimate ones), which the models never saw and whose true answer is known. `07_make_demo_sample.py` makes this file with the same `random_state=42` split.
+- **Transaction monitor:** scores all 500, shows caught / missed / false alarms, a table with every transaction's score, verdict and true label, and the confusion matrix.
+- **Inspect a transaction:** what each model thinks about one transaction, as a bar chart.
+- **Model comparison:** all five detectors side by side, plus the official full test-set results. A **threshold slider** shows the precision/recall trade-off live.
+- **Upload a CSV:** any file in the `creditcard.csv` format.
+- **How Streamlit works:** the page is a Python script. Each widget is one function call, and Streamlit re-runs the script whenever the user changes something. `@st.cache_data` stops the models re-scoring the same data each time.
 
 ### Step 10 — Deployment
-- Backend on **Render** (free tier: sleeps when idle, first request can take 50+ seconds). Run by Uvicorn.
-- Frontend on **Vercel** (auto-deploys when `main` changes).
-- GitHub Actions runs the tests and the build on every pull request.
+- Dashboard on **Streamlit Community Cloud** (free; redeploys when `main` changes).
+- API on **Render** (free tier: sleeps when idle, first request can take 50+ seconds). Run by Uvicorn.
+- GitHub Actions runs all the tests on every pull request.
 
 ---
 
@@ -144,7 +152,9 @@ When the page sends a transaction to `/predict`:
 | Random Forest as the final model | Best F1 and balance | "Chosen on the test set?" Yes, see section 9. |
 | Saved the scaler | Same scaling for new data | |
 | FastAPI instead of Flask | Built-in validation, automatic docs at `/docs`, type hints; same output (checked) | "Why change a working app?" Cleaner input checking and testing, no change in behaviour. |
-| Render + Vercel | Free, simple, auto-deploy | |
+| Streamlit for the website | Pure Python, the same language as the model; tables, charts and file upload built in | "Why not React?" I started with React, but replaced it with a stack I can fully explain, and Streamlit is the standard tool for data and ML dashboards. |
+| Real test-set transactions instead of an input form | PCA inputs can't be typed; known labels let me show right and wrong answers | "Isn't the sample biased?" Yes, deliberately enriched to 20% fraud so there is something to see. The official results are on the full test set. |
+| Streamlit Cloud + Render | Free, simple, auto-deploy | |
 
 ---
 
@@ -197,11 +207,20 @@ It meets my goal of above 80%, up from 53%, but 18 frauds still slip through. In
 Because the model "legitimate always" scores 99.83%.
 
 ### About the system
-**Q: What happens when I click Predict?**
-Use the 5 steps in section 2, Step 8. Mention scaling and column order, because they're the easy places to go wrong.
+**Q: How does the dashboard decide a transaction is fraud?**
+Use the 4 steps in section 2, Step 8, then: flag it if the score is above the threshold (0.5 by default, exactly what scikit-learn's `predict()` does). Mention scaling and column order, because they're the easy places to go wrong.
 
-**Q: Why does the first request take so long?**
-Render's free tier puts the server to sleep. The page now pings `/health` when it opens to wake it early.
+**Q: Why can't I type in my own transaction?**
+The model's inputs are 28 PCA features the bank created for privacy. No person can make up realistic values for them, and random values would be meaningless. So I demonstrate on real transactions from the held-out test set, where I also know the right answer. A real bank would feed the model from its payment system, not from a form.
+
+**Q: Is the dashboard sample representative?**
+No, on purpose. It has all 98 test frauds but only 402 legitimate transactions, about 20% fraud against 0.17% in reality, so there are enough frauds to look at. Recall on it is still meaningful (it contains every test fraud), but precision looks much better than in real life. That's why the official full test-set table is shown next to it.
+
+**Q: How does Streamlit work?**
+The whole page is one Python script. `st.title`, `st.slider`, `st.dataframe` and so on each draw one element. When the user moves the slider, Streamlit runs the script again from the top with the new value. `@st.cache_data` remembers results such as the model scores, so they aren't recomputed every time.
+
+**Q: Why is there also an API?**
+So other programs, for example a payment system, could ask the model for a verdict over HTTP. The dashboard and the API use the same `scoring.py`, so they always agree. A test checks that.
 
 **Q: What does the "fraud score" mean?**
 The Random Forest's probability that the transaction is fraud. It isn't a calibrated real-world probability (see section 9).
@@ -210,7 +229,7 @@ The Random Forest's probability that the transaction is fraud. It isn't a calibr
 Automatic validation (bad input gets a clear error instead of a crash), automatic docs at `/docs`, and clean type hints. I checked that the old Flask version and the new FastAPI version give identical predictions on the same five transactions.
 
 **Q: How did you test it?**
-15 automated tests: valid prediction, bad input, the five demo transactions keeping their verdicts, the compare endpoint, and a health check. A GitHub Actions workflow runs them and the frontend build on every pull request.
+22 automated tests. API (15): valid prediction, bad input, the five demo transactions keeping their verdicts, the compare endpoint, a health check. Scoring module (4): column order, missing columns, and batch scores matching the API. Dashboard (3): every view renders for every model, threshold and filter. GitHub Actions runs them all on every pull request.
 
 **Q: What would you change for production?**
 Retrain regularly (fraud patterns drift), pick the threshold from business cost, calibrate probabilities, add explanations (for example SHAP) so analysts see *why* a transaction was flagged, monitor performance, add authentication and rate limiting, restrict CORS, and send flagged transactions to human review rather than blocking automatically.
@@ -227,10 +246,11 @@ creditcard.csv ─▶ scale Amount, Time ─▶ split 80/20 (stratified)
                           test 20% ──────────────────────────────────▶ evaluate (real, imbalanced)
 ```
 
-**Live request**
+**Using the model**
 ```
-React page ──JSON──▶ FastAPI ──validate──▶ scale Amount,Time ──▶ Random Forest ──▶ {"prediction","confidence"}
-(Vercel)             (Render)              (scaler.pkl)           (rf_model.pkl)
+test_sample.csv (500 real, unseen) ─▶ Streamlit dashboard ─┐
+                                                           ├─▶ scoring.py: scale Amount,Time ─▶ RF / GB / AdaBoost ─▶ fraud scores
+JSON request ──────────────────────▶ FastAPI /predict ─────┘    (scaler.pkl)                     (.pkl files)
 ```
 
 ---
@@ -242,26 +262,27 @@ Examiners often ask "which part did you write?" or ask you to open a file and ex
 | Part | Honest description |
 |---|---|
 | Both iterations: exploration, preprocessing, training, ensembles, evaluation, reasoning in the `NOTES.md` files | Yours. Know every line. |
-| React UI (original version) | Your `NOTES.md` says it was built by your **mentor**. Say so plainly, and add what you did: connected it to the backend, set up the Vite proxy, and deployed it. |
-| Flask → FastAPI port, validation, tests, `/compare`, editable Amount, wake-up ping, CI workflow, `06_improved_evaluation.py`, the guides | Written with an AI assistant (Claude) during a review of the repo. If asked, say that. Before the viva, read each of these files until you can explain every function and why it exists. |
+| The first React UI (now removed) | Your `NOTES.md` says it was built by your **mentor**. If asked about the project's history, say so. |
+| Streamlit dashboard, `scoring.py`, Flask → FastAPI port, validation, tests, `/compare`, CI workflow, `06` and `07` scripts, the guides | Written with an AI assistant (Claude) during a review of the repo. If asked, say that. The dashboard is plain Python on purpose so you can own it: read `streamlit_app.py` and `scoring.py` top to bottom until you can explain every function and why it exists. |
 
 Saying "I used an AI assistant for the migration and tests, and I reviewed and can explain all of it" is a better answer than being caught out. Whatever you present as yours, make sure it is.
 
 ---
 
-## 8. Live demo script (3–4 minutes)
+## 8. Live demo script (4–5 minutes)
 
-**Before the viva:** open the live site **at least 2 minutes early** so the Render server wakes up. Have the local version ready as a backup (`uvicorn app:app --port 5000` and `npm run dev`), plus screenshots in case the internet fails.
+**Before the viva:** run `07_make_demo_sample.py` once and commit the sample, or the dashboard shows only the 5 fallback transactions. Open the live dashboard **a few minutes early**, because the free hosting sleeps when idle. Have it running locally as a backup (`streamlit run iteration_2_ulb/dashboard/streamlit_app.py`), plus screenshots in case the internet fails.
 
-1. Open the page. Point at the status line: "Server ready". Explain the wake-up ping.
-2. Select **Identity Theft Purchase — $239.94** → **Predict**. Result: fraud, score about 97%. "A clear fraud case; the model is confident."
-3. Click **Compare all models**. Show the table: all three say fraud, hard voting 3 of 3, soft voting about 84%.
-4. Change **Amount** to `10` and predict again (score drops to about 93%). "Same pattern, different amount: the V-features do most of the work."
-5. Select **Suspicious Foreign Transfer — $239.93** → **Predict**. Result: **legitimate**, score about 8%. "This is one of the frauds my model misses; recall is 0.82, not 1.0. That's honest behaviour, not a bug."
-6. Click **Compare all models** on the same transaction. Gradient Boosting (74%) and AdaBoost (53%) flag it; hard voting catches it; soft voting (45%) misses it. "This shows the trade-off in my ensemble experiment: the boosters catch more fraud but raise many more false alarms across the whole dataset."
-7. Optional: open `/docs` on the API, show the request format and try one request there.
+1. **Start on the Transaction monitor.** "These are 500 real transactions from my test set. The model never saw them during training, and I know which ones were really fraud."
+2. **Read the counts.** With Random Forest at 0.50, it should show **80 of 98 frauds caught and 18 missed**. "These are exactly my notebook's numbers, because this sample contains every one of the 98 test-set frauds. The website reproduces my evaluation." (Check this before the viva. If the numbers differ, find out why first.)
+3. **Filter to "Missed".** "These are the 18 frauds my model lets through. Recall is 0.82, not 1.0." Then filter to "False alarm".
+4. **Inspect a missed fraud.** Open one in the **Inspect** tab. Random Forest gives it a low score, but often Gradient Boosting or AdaBoost flag it. "This is the trade-off in my ensemble experiment."
+5. **Move the threshold slider** down to 0.3, then up to 0.7, and watch caught, missed and false alarms change. "A bank would choose this point from the cost of a missed fraud against an annoyed customer. I used the default 0.5. Tuning it is in my future work."
+6. **Model comparison tab.** Switch through the detectors. "Gradient Boosting and AdaBoost catch more, but on the full test set they raise 746 and 1,598 false alarms against Random Forest's 17. That's why Random Forest is the final model." Point to the official table.
+7. **Explain the sample honestly.** "The sample is about 20% fraud so there's something to see. Real traffic is 0.17%, so precision here looks better than in reality. The official numbers are in this table."
+8. Optional: **Upload a CSV**, or open the API's `/docs` page and send one transaction.
 
-**Likely demo questions:** "What if I send bad data?" (show a 422 in `/docs`). "Why does this transaction score only 51%?" (the first preset is borderline: Random Forest gives it 0.51, just over 0.5).
+**Likely demo questions:** "Why can't I enter a transaction?" (PCA inputs, see section 5). "Why are there no false alarms here?" (only 402 of the 56,864 legitimate test transactions are in the sample; on the full set Random Forest makes 17, about 3 in 10,000).
 
 ---
 
@@ -277,7 +298,7 @@ Owning limitations shows understanding. Each has a short answer.
 6. **Only SMOTE tried on the ULB data.** Class weights, undersampling and other methods weren't compared there.
 7. **Old data.** Two days of European transactions from 2013. Fraud patterns change.
 8. **Explainability.** Because of PCA I can't tell a user why a transaction was flagged.
-9. **Demo is five fixed transactions** (plus an editable amount), not free-form input; nobody can type 28 PCA values.
+9. **The demo sample is enriched** (20% fraud against 0.17% in reality), so its precision looks better than real life. Nobody can type 28 PCA values, so there is no free-form input.
 10. **Deployment is a demo.** Free tier cold starts, open CORS by default, no authentication.
 
 If asked "what would you do next?", the answer is the `06` script's agenda: fix the leakage, report PR-AUC, tune the threshold on validation data, calibrate, and cross-validate. Then compare XGBoost and other imbalance methods.
@@ -310,7 +331,7 @@ If asked "what would you do next?", the answer is the `06` script's agenda: fix 
 
 - [ ] Read `NOTES.md` (both), `PROJECT_GUIDE.md` and this guide once more.
 - [ ] Run `06_improved_evaluation.py` on your machine and write the real numbers here, so you can say "I re-evaluated more rigorously and got…".
-- [ ] Confirm Render's start command is `uvicorn app:app --host 0.0.0.0 --port $PORT` and the live site works.
-- [ ] Open the live site 2+ minutes before you present.
-- [ ] Be able to open `app.py`, `02_preprocess.py` and `03_train_models.py` and explain each line.
+- [ ] Run `07_make_demo_sample.py`, commit `data/demo/test_sample.csv`, and check the dashboard shows 80 of 98 caught.
+- [ ] Deploy the dashboard on Streamlit Community Cloud (see `PROJECT_GUIDE.md` section 2.4) and open it a few minutes before you present.
+- [ ] Be able to open `streamlit_app.py`, `scoring.py`, `02_preprocess.py` and `03_train_models.py` and explain each line.
 - [ ] Practise the 30-second, 3-minute and 10-minute versions out loud.
