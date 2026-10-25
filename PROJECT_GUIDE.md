@@ -8,11 +8,12 @@ A plain-language guide to what FraudLens does, how it works, what has changed si
 
 FraudLens takes a credit-card transaction (30 numbers: `V1`–`V28`, `Amount`, `Time`) and says whether it looks **fraud** or **legitimate**, along with a score from 0 to 1 for how strongly the model leans toward fraud.
 
-Users pick one of five real fraud cases from the test set in a React web page. The page sends the numbers to a Python API, and the API runs a trained Random Forest and returns the answer.
+Nobody can type 28 anonymous PCA numbers by hand, so the website (a **Streamlit dashboard**, written in Python) runs the trained models on a batch of **real test-set transactions whose true answer is known**. It shows what was caught, missed and wrongly flagged. A separate **FastAPI** service offers the same model as a JSON API. Both use one shared file, `backend/scoring.py`, to prepare and score transactions.
 
 ```
-React page (Vercel)  ──POST /predict (JSON)──▶  FastAPI (Render)  ──▶  scaler.pkl + rf_model.pkl
-        ◀────────── {"prediction": "fraud", "confidence": 0.93} ──────────────┘
+Streamlit dashboard ──┐
+                      ├──▶ backend/scoring.py ──▶ scaler.pkl + rf/gb/ada model .pkl files
+FastAPI  /predict  ───┘
 ```
 
 The repository has two iterations:
@@ -79,26 +80,34 @@ A FastAPI app with three routes:
 - `POST /compare` — same input. Scores the transaction with Random Forest, Gradient Boosting and AdaBoost, then applies the two ensemble rules from `04_ensemble.py`: **hard voting** (fraud if at least 2 of 3 models say fraud) and **soft voting** (average the three fraud probabilities, fraud at 0.5 or above). Uses the `gb_model.pkl` and `ada_model.pkl` files you already had.
 - `GET /health` — returns `{"status": "ok"}` (for uptime checks and for waking Render).
 
-FastAPI also generates interactive docs at `/docs`. CORS defaults to open (`*`) so the Vercel site can call the API; setting the `CORS_ORIGINS` environment variable on Render (comma-separated list of sites) restricts it.
+FastAPI also generates interactive docs at `/docs`. The scaling and column ordering live in `backend/scoring.py`, which the dashboard uses too. CORS defaults to open (`*`) so any web page can call the API; setting the `CORS_ORIGINS` environment variable on Render (comma-separated list of sites) restricts it.
 
-### 2.3 Frontend (`iteration_2_ulb/frontend/`)
+### 2.3 Dashboard (`iteration_2_ulb/dashboard/streamlit_app.py`)
 
-Vite + React + TypeScript. `src/App.tsx` holds five preset real transactions, a dropdown, an editable Amount box, a **Predict** button and a **Compare all models** button.
+Built with **Streamlit**, a Python library that turns a Python script into a web page. There is no HTML, JavaScript or React. Every widget is one Python call (`st.slider`, `st.dataframe`, `st.bar_chart`…), and Streamlit re-runs the script from top to bottom whenever the user changes something.
 
-- **Predict** shows the verdict and a "Fraud score" bar (the Random Forest's fraud probability).
-- **Compare all models** shows a table: each model's verdict and score, plus the hard- and soft-voting results.
-- **Editable Amount.** The box starts at the preset's amount. Change it to see how the same transaction scores at a different amount. Negative or empty values disable the buttons.
-- **Server wake-up.** When the page opens it quietly calls `/health`. The free Render server sleeps when idle, so this wakes it before the user clicks. A status line shows "Waking up the server…", "Server ready" or "Server unreachable".
+**Where the transactions come from.**
+- By default, `data/demo/test_sample.csv`: 500 real transactions from the **test set** (all 98 test frauds plus 402 random legitimate ones). It is made once by `notebooks/07_make_demo_sample.py`, using the same `random_state=42` split as training, so the models have never seen these rows.
+- If that file doesn't exist yet, it falls back to the 5 preset fraud cases in `backend/sample_transactions.json` and shows a warning.
+- The user can also upload any CSV with the `creditcard.csv` columns. If it has a `Class` column, every answer is checked against it.
 
-The API address comes from `VITE_API_URL`:
+The sample is about 20% fraud, against 0.17% in real life, so there is something to look at. Precision on the sample therefore looks better than in reality. The page says so and shows the official full test-set results next to it.
 
-- Development: empty, so `/predict`, `/compare` and `/health` go through the Vite proxy (`vite.config.ts`) to a local backend on port 5000.
-- Production build: `.env.production` points to the Render URL.
+**Sidebar.** Choose the transactions, the detector (Random Forest, Gradient Boosting, AdaBoost, hard voting or soft voting), and the **fraud threshold** (default 0.50, the value the project uses).
+
+**Tabs.**
+1. **Transaction monitor:** counts (checked, flagged, caught, missed, false alarms), a table of every transaction with its fraud score, verdict, true label and result, a filter, a CSV download, and the confusion matrix.
+2. **Inspect a transaction:** one transaction's amount and time, the verdict and whether it was right, a bar chart of every model's fraud score, the hard-voting count, and the 30 raw inputs.
+3. **Model comparison:** all five detectors side by side on this batch at the chosen threshold, plus the official full test-set table from `NOTES.md`. Moving the threshold shows the precision/recall trade-off live.
+4. **How it works:** a plain-language summary for a visitor.
+
+**The decision rule.** A transaction is flagged when its score is **above** the threshold. At 0.50 this is exactly what scikit-learn's `predict()` does. Hard voting flags it when at least 2 of the 3 models do.
 
 ### 2.4 Deployment
 
-- Backend on Render (free tier; the first request after idle can take 50+ seconds).
-- Frontend on Vercel (auto-deploys on push to `main`).
+- **Dashboard:** Streamlit Community Cloud (free). Sign in with GitHub at share.streamlit.io, choose this repository, set the main file to `iteration_2_ulb/dashboard/streamlit_app.py`, and pick Python 3.13 under advanced settings. It redeploys on every push to `main`. It can also run on Render as a web service with the start command `streamlit run iteration_2_ulb/dashboard/streamlit_app.py --server.port $PORT --server.address 0.0.0.0`.
+- **API:** Render (free tier; the first request after idle can take 50+ seconds). Start command `uvicorn app:app --host 0.0.0.0 --port $PORT`, from the `backend` folder.
+- **The old Vercel site** served the React frontend, which has been removed. Disconnect or delete that Vercel project, or every push will try, and fail, to build a folder that no longer exists.
 
 ---
 
@@ -152,6 +161,21 @@ From `git log`, oldest first:
 
 **Not changed:** the trained models, the datasets, the results, the notebooks other than `02_preprocess.py` (changed) and the new `06` script, and the two `NOTES.md` files (they remain your original reasoning).
 
+### Third round: React replaced by a Streamlit dashboard
+
+Why: the React page asked the user to pick one of five transactions and offered an editable Amount, which proved little. Nobody can type the 28 PCA inputs, so a "type in a transaction" form can never work. React and TypeScript were also a stack you don't use, which is hard to defend in a viva. The new dashboard is plain Python and shows the model working on hundreds of real, labelled, unseen transactions.
+
+| # | Change | Where | Why |
+|---|---|---|---|
+| 25 | **Removed the React frontend** (`frontend/`: React, TypeScript, Vite) | `iteration_2_ulb/frontend/` | Replaced by the Streamlit dashboard. It is still in git history. |
+| 26 | **New Streamlit dashboard** | `dashboard/streamlit_app.py`, `dashboard/requirements.txt` | Transaction monitor, single-transaction view, model comparison with a threshold slider, CSV upload. All Python. See section 2.3. |
+| 27 | Shared scoring module | `backend/scoring.py` | Loading the models, scaling `Amount`/`Time` and ordering the columns now happen in one place, used by both the API and the dashboard, so they can never disagree. |
+| 28 | API uses the shared module | `backend/app.py` | Same endpoints, same output; all 15 API tests still pass. |
+| 29 | Demo sample script | `notebooks/07_make_demo_sample.py` | Makes the 500-row test-set sample the dashboard shows. Run it once locally (it needs `creditcard.csv`) and commit `data/demo/test_sample.csv`. |
+| 30 | Tests for the shared module and the dashboard | `backend/test_scoring.py`, `dashboard/test_dashboard.py` | Check column order, missing-column errors, that batch scores equal the API's, and that every dashboard view renders without errors. |
+| 31 | CI tests the dashboard instead of building React | `.github/workflows/ci.yml` | |
+| 32 | README rewritten for a general reader | `README.md` | |
+
 ---
 
 ## 4. Flask → FastAPI: what changed and what to know
@@ -165,7 +189,7 @@ From `git log`, oldest first:
 | API docs | None | Automatic at `/docs` |
 | Predict handler | Synchronous | Still plain `def`, which FastAPI runs in a thread, so slow model calls don't block other requests |
 
-The request and response JSON are unchanged, so the React page works without modification. This was checked, not assumed: your original Flask `app.py` (from git history) and the new FastAPI app were run on the same five demo transactions and returned identical predictions and scores.
+The request and response JSON are unchanged, so the React page in use at the time needed no changes. This was checked, not assumed: your original Flask `app.py` (from git history) and the new FastAPI app were run on the same five demo transactions and returned identical predictions and scores.
 
 ### ⚠️ Required action before deploying to Render
 
@@ -181,17 +205,18 @@ Also confirm the build still runs `pip install -r requirements.txt` from the `ba
 
 ## 5. Current verification status
 
-**Checked in the review environment (Python 3.13, scikit-learn 1.9.0, Node 22):**
+**Checked in the review environment (Python 3.13, scikit-learn 1.9.0, Streamlit 1.66):**
 
-- Backend: all 15 `pytest` tests pass.
-- Original Flask app vs new FastAPI app: identical output on all five demo transactions.
-- Frontend: `npm run build` (TypeScript check plus production build) succeeds.
-- Whole site in a real browser (Chromium driven by Playwright, local API plus Vite dev server): the status line reaches "Server ready", Predict and Compare both work, negative and empty amounts disable the buttons, an edited amount changes the score (239.94 → 97.0% fraud; 10 → 93.0%), and there were no console errors.
-- `06_improved_evaluation.py` runs end to end, but only on synthetic data.
+- API: all 15 tests pass, plus 4 tests for the shared scoring module (19 in total). The batch scores the dashboard uses match the API's answers exactly.
+- Original Flask app vs FastAPI app: identical output on all five demo transactions.
+- Dashboard: 3 tests using Streamlit's own test tool pass. They cover every detector, a changed threshold and every filter.
+- Dashboard in a real browser (Chromium): all tabs render with no errors. This was checked with a temporary **fake** 500-row file, deleted afterwards, because the real sample can only be made where `creditcard.csv` is.
+- `07_make_demo_sample.py` and `06_improved_evaluation.py` run end to end, but only on synthetic data.
 
 **Not checked:**
 
-- The live Render and Vercel deployments. The Render start command change (section 4) is still yours to do.
+- The dashboard with the **real** 500-row sample. You need to run `07_make_demo_sample.py` and commit its output first.
+- Any live deployment. The Streamlit Cloud setup and the Vercel clean-up (section 2.4) are yours to do.
 - The GitHub Actions workflow, which only runs once it is on GitHub. Look at the "Checks" tab of the pull request.
 - The real numbers from `06_improved_evaluation.py`, which need `creditcard.csv`.
 
@@ -200,14 +225,16 @@ To repeat the checks yourself:
 ```bash
 cd iteration_2_ulb/backend
 pip install -r requirements-dev.txt
-pytest                                  # 15 tests
+pytest                                  # 19 tests
 uvicorn app:app --port 5000             # API docs at http://127.0.0.1:5000/docs
 
-cd ../frontend
-npm install && npm run build            # type-checks and builds
-npm run dev                             # open the printed address (backend must be running)
+cd ../dashboard
+pip install -r requirements.txt pytest
+pytest                                  # 3 tests
+streamlit run streamlit_app.py          # opens the dashboard in your browser
 
 cd ../notebooks                         # needs data/raw/creditcard.csv
+python 07_make_demo_sample.py           # then commit ../data/demo/test_sample.csv
 python 06_improved_evaluation.py --skip-cv
 ```
 
@@ -219,7 +246,7 @@ These are good points to raise yourself in a viva.
 
 1. **`confidence` is not a true probability.** The Random Forest was trained on SMOTE-balanced data (50% fraud), so its scores are shifted upward compared with the real 0.17% fraud rate. Treat it as a ranking score. `06_improved_evaluation.py` measures this and shows calibration as the fix, but the deployed model is still the uncalibrated one.
 2. **The 0.5 threshold is arbitrary.** AUC-ROC is above 0.96 for all three models, so the ranking is good; the poor precision of Gradient Boosting and AdaBoost is mostly a threshold/SMOTE issue, not a weak model. The `06` script's threshold sweep tests this claim; run it before you rely on it.
-3. **Only five demo transactions.** The V1–V28 columns are PCA outputs, so users can't type meaningful values. Demos use real test-set rows.
+3. **No free-form input.** The V1–V28 columns are PCA outputs, so nobody can type a meaningful transaction. The dashboard uses real test-set rows (or an uploaded CSV) instead, which is also a fairer demonstration.
 4. **Evaluated on one split.** 98 frauds in the test set means each missed fraud moves recall by about one percentage point. Cross-validation would give a steadier estimate (the `06` script does this).
 5. **The ULB data is two days of European transactions from 2013.** Fraud patterns drift; the model would need retraining on current data.
 6. **`Time` is seconds since the first transaction in the dataset**, not time of day, so scaling it is of limited meaning for new transactions.
@@ -227,7 +254,7 @@ These are good points to raise yourself in a viva.
 8. **Free-tier cold starts.** The first request after idle can take 50+ seconds.
 9. **Model files are committed to git** (rf_model.pkl is about 16 MB) and are tied to scikit-learn 1.9.0.
 10. **`RoughWork.py` files are still tracked in git.** The `.gitignore` rule `notebooks/RoughWork.py` only matches a top-level `notebooks/` folder, so it doesn't ignore the ones inside the iteration folders. They are harmless; `iteration_2_ulb/notebooks/RoughWork.py` is the original scaler script that `02_preprocess.py` now replaces.
-11. **The Vercel URL differs between files.** The README says `fraudlens-two.vercel.app` and `NOTES.md` says `fraudlens-eight.vercel.app`. Check which is live and make them agree.
+11. **`NOTES.md` still describes the old React + Vercel frontend** in its Step 5 and Step 7. Those notes are your history and were left untouched, but add a line saying the frontend is now a Streamlit dashboard.
 12. **Iteration 1's data CSVs are tracked in git**, although the README says large data is not. Decide whether to untrack them.
 13. **The training pipeline still has the scaler leakage.** `02_preprocess.py` fits the scaler on all rows before splitting, and the deployed model was trained that way. The effect is tiny, and the `06` script measures a leakage-free version, but the deployed files were not regenerated.
 
@@ -252,12 +279,11 @@ Ordered roughly by value for a project defence. Things marked done were added in
 - A Dockerfile for repeatable deployment.
 - Load models with FastAPI's `lifespan` handler and expose the model version in `/health`.
 
-**Frontend**
-- Done: editable amount, model comparison view, server wake-up status, "Fraud score" label.
+**Dashboard**
+- Done: transaction monitor, single-transaction view, model comparison, threshold slider, CSV upload, tests.
 - Show the top contributing features for each prediction (needs the SHAP item above).
-- A threshold slider showing the precision/recall trade-off (needs the real numbers from the `06` script).
-- Add `eslint` and component tests to `package.json`.
+- A precision-recall curve chart, and the results of the `06` script on their own tab.
 
 **Repository**
 - Move the pickles to Git LFS or a release asset; add a script that runs the notebooks in order.
-- Fix the `.gitignore` for `RoughWork.py`, unify the Vercel URL, and add a LICENSE.
+- Fix the `.gitignore` for `RoughWork.py` and add a LICENSE.

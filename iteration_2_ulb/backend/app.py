@@ -1,40 +1,22 @@
-from pathlib import Path
 import os
 from typing import Annotated
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import Field, create_model
-import joblib
 import pandas as pd
+
+# Models, scaler and the shared scaling code live in scoring.py, which the
+# Streamlit dashboard also uses
+from scoring import INPUT_COLUMNS as REQUIRED_FIELDS, MODELS, MAIN_MODEL as model, prepare
 
 app = FastAPI(title="FraudLens API")
 
-# Allow the React app (Vercel / Vite dev server) to call this API.
-# Set CORS_ORIGINS="https://your-site.vercel.app" on Render to lock it down;
+# Allow web pages on other sites to call this API from the browser.
+# Set CORS_ORIGINS="https://your-site.example" on Render to lock it down;
 # the default "*" allows any website.
 ALLOWED_ORIGINS = os.environ.get('CORS_ORIGINS', '*').split(',')
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
-
-# Models live next to the backend folder; resolve from this file so the app
-# works no matter which directory it is started from
-MODELS_DIR = Path(__file__).resolve().parent.parent / 'models'
-
-# Load the trained models. Random Forest is the main model (best F1);
-# the other two are only used by /compare.
-model = joblib.load(MODELS_DIR / 'rf_model.pkl')
-COMPARE_MODELS = {
-    'random_forest': model,
-    'gradient_boosting': joblib.load(MODELS_DIR / 'gb_model.pkl'),
-    'adaboost': joblib.load(MODELS_DIR / 'ada_model.pkl'),
-}
-
-# Scaler fitted on raw Amount and Time (see notebooks/02_preprocess.py)
-scaler = joblib.load(MODELS_DIR / 'scaler.pkl')
-
-# The 28 anonymised PCA columns from the ULB dataset
-V_FEATURES = [f'V{i}' for i in range(1, 29)]
-REQUIRED_FIELDS = V_FEATURES + ['Amount', 'Time']
 
 # Request schema: 30 required numbers. FastAPI/Pydantic rejects missing or
 # non-numeric fields with a 422 response that names the bad fields, so no
@@ -50,21 +32,7 @@ def health():
 
 def build_features(transaction):
     """Turn a validated request into the one-row table the models were trained on."""
-    data = transaction.model_dump()
-
-    # Scale Amount and Time the same way as during training
-    scaled_amount, scaled_time = scaler.transform(
-        pd.DataFrame([[data['Amount'], data['Time']]], columns=['Amount', 'Time'])
-    )[0]
-
-    row = {name: data[name] for name in V_FEATURES}
-    row['scaled_Amount'] = scaled_amount
-    row['scaled_Time'] = scaled_time
-
-    # The models remember the column names and order they were trained on.
-    # Using that order (and passing named columns) means scikit-learn itself
-    # raises an error if a column is ever missing or misnamed.
-    return pd.DataFrame([row], columns=list(model.feature_names_in_))
+    return prepare(pd.DataFrame([transaction.model_dump()]))
 
 
 def label(is_fraud):
@@ -98,7 +66,7 @@ def compare(transaction: Transaction):
     models = {}
     probabilities = []
     votes = 0
-    for name, m in COMPARE_MODELS.items():
+    for name, m in MODELS.items():
         probability = float(m.predict_proba(features_array)[0][1])
         is_fraud = m.predict(features_array)[0] == 1
         probabilities.append(probability)
